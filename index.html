@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gantt de Tasks e Subtasks</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-area">
+      <div class="brand-mark">
+        <img src="logo-sisp.png" alt="SISP" />
+      </div>
+      <div>
+        <p class="eyebrow">Sistema Integrado de Segurança Pública</p>
+        <h1>Gantt de Tasks e Subtasks</h1>
+        <p>Sistema de acompanhamento com Google Sheets, dashboard e modo edição.</p>
+      </div>
+    </div>
+
+    <div class="top-actions">
+      <button id="btn-view" class="seg active" type="button">Visualização</button>
+      <button id="btn-edit" class="seg" type="button">Edição</button>
+      <button id="btn-config" class="ghost" type="button">Configurar API</button>
+      <button id="btn-refresh" class="primary" type="button">Atualizar</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="alert" class="alert hidden"></section>
+
+    <section id="config-panel" class="card hidden">
+      <h2>Configuração</h2>
+      <p class="muted">
+        Cole a URL do Web App do Apps Script, terminada em <code>/exec</code>.
+      </p>
+      <div class="form-grid one">
+        <label>
+          URL da API
+          <input id="api-url" type="url" placeholder="https://script.google.com/macros/s/XXXXX/exec" />
+        </label>
+      </div>
+      <div class="actions-row">
+        <button id="btn-save-config" class="primary" type="button">Salvar configuração</button>
+        <button id="btn-load-sample" type="button">Usar dados de exemplo</button>
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="metric">
+        <span class="metric-label">Total de subtasks</span>
+        <strong id="metric-total">0</strong>
+      </article>
+      <article class="metric">
+        <span class="metric-label">Em andamento</span>
+        <strong id="metric-progress">0</strong>
+      </article>
+      <article class="metric">
+        <span class="metric-label">Concluídas</span>
+        <strong id="metric-done">0</strong>
+      </article>
+      <article class="metric">
+        <span class="metric-label">Atrasadas</span>
+        <strong id="metric-late">0</strong>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <p class="section-kicker">Visão executiva</p>
+          <h2>Dashboard</h2>
+          <p class="muted">Distribuição por status e tipo, com identidade visual SISP.</p>
+        </div>
+      </div>
+      <div class="charts-grid">
+        <div>
+          <h3>Status</h3>
+          <div id="status-chart" class="bars"></div>
+        </div>
+        <div>
+          <h3>Tipo</h3>
+          <div id="type-chart" class="bars"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="editor-card" class="card hidden">
+      <div class="section-head">
+        <div>
+          <p class="section-kicker">Gestão operacional</p>
+          <h2>Cadastro / edição</h2>
+          <p class="muted">Inclua novas subtasks ou edite registros existentes.</p>
+        </div>
+        <button id="btn-clear-form" type="button">Limpar formulário</button>
+      </div>
+
+      <form id="task-form">
+        <input id="id" name="id" type="hidden" />
+        <div class="form-grid">
+          <label>
+            Task name
+            <input id="task-name" name="task name" required placeholder="Ex.: SISP Mulher nativo" />
+          </label>
+
+          <label>
+            Subtask name
+            <input id="subtask-name" name="subtask name" required placeholder="Ex.: Subida PRD" />
+          </label>
+
+          <label>
+            Start
+            <input id="start" name="start" type="date" required />
+          </label>
+
+          <label>
+            End
+            <input id="end" name="end" type="date" required />
+          </label>
+
+          <label>
+            Duration (days)
+            <input id="duration" name="duration (days)" type="number" min="0" readonly />
+          </label>
+
+          <label>
+            Dependency
+            <input id="dependency" name="dependency" placeholder="Ex.: 1, 2 ou P-01" />
+          </label>
+
+          <label>
+            Resources
+            <input id="resources" name="resources" placeholder="Ex.: SESP, PRODERJ, EDS" />
+          </label>
+
+          <label>
+            Type
+            <select id="type" name="type">
+              <option value="Projeto">Projeto</option>
+              <option value="Premissa">Premissa</option>
+              <option value="Desenvolvimento">Desenvolvimento</option>
+              <option value="Homologação">Homologação</option>
+              <option value="Produção">Produção</option>
+              <option value="Reunião">Reunião</option>
+              <option value="Marco">Marco</option>
+            </select>
+          </label>
+
+          <label>
+            Status
+            <select id="status" name="status">
+              <option value="Não iniciado">Não iniciado</option>
+              <option value="Em andamento">Em andamento</option>
+              <option value="Bloqueado">Bloqueado</option>
+              <option value="Concluído">Concluído</option>
+              <option value="Cancelado">Cancelado</option>
+            </select>
+          </label>
+
+          <label class="full">
+            Observações
+            <textarea id="observacoes" name="observações" rows="3" placeholder="Observações gerais, riscos, pendências ou condicionantes."></textarea>
+          </label>
+        </div>
+
+        <div class="actions-row">
+          <button class="primary" type="submit">Salvar task/subtask</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <p class="section-kicker">Cronograma</p>
+          <h2>Quadro Gantt</h2>
+          <p class="muted">Linha do tempo por subtask, agrupada por task name.</p>
+        </div>
+        <div class="filters">
+          <input id="search" placeholder="Buscar task, subtask ou recurso..." />
+          <select id="status-filter">
+            <option value="">Todos os status</option>
+            <option value="Não iniciado">Não iniciado</option>
+            <option value="Em andamento">Em andamento</option>
+            <option value="Bloqueado">Bloqueado</option>
+            <option value="Concluído">Concluído</option>
+            <option value="Cancelado">Cancelado</option>
+          </select>
+          <select id="type-filter">
+            <option value="">Todos os tipos</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="gantt" class="gantt"></div>
+    </section>
+
+    <section class="card">
+      <div class="section-head">
+        <div>
+          <p class="section-kicker">Base analítica</p>
+          <h2>Base de registros</h2>
+          <p class="muted">Tabela de apoio para edição e conferência.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Task</th>
+              <th>Subtask</th>
+              <th>Start</th>
+              <th>End</th>
+              <th>Dias</th>
+              <th>Dependência</th>
+              <th>Recursos</th>
+              <th>Tipo</th>
+              <th>Status</th>
+              <th>Observações</th>
+              <th class="edit-only">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <template id="row-actions-template">
+    <button class="mini edit-row" type="button">Editar</button>
+    <button class="mini danger delete-row" type="button">Excluir</button>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
