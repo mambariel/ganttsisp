@@ -564,16 +564,22 @@ function isRowLate(row) {
 }
 
 function statusClass(status) {
-  const value = (status || "")
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, "-");
+  const value = normalizeStatus(status);
 
+  if (value === "nao-iniciado") return "status-nao-iniciado";
+  if (value === "em-andamento") return "status-em-andamento";
   if (value === "concluido") return "status-concluido";
   if (value === "bloqueado") return "status-bloqueado";
   if (value === "cancelado") return "status-cancelado";
   return "";
+}
+
+function normalizeStatus(status) {
+  return (status || "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .replace(/\s+/g, "-");
 }
 
 function dateRange(start, end) {
