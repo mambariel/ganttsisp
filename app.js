@@ -578,15 +578,9 @@ function normalizeStatus(status) {
   return String(status || "")
     .trim()
     .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, "-");
-}
+    .replace(/\p{Diacritic}
 
-/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, "-");
-}
+
 
 function dateRange(start, end) {
   const dates = [];
