@@ -77,8 +77,19 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 document.addEventListener("DOMContentLoaded", () => {
+  bindEvents();
   $("api-url").value = state.apiUrl;
+  setMode("view");
 
+  if (state.apiUrl) {
+    loadRows();
+  } else {
+    useSampleData(false);
+    showAlert("Configure a URL da API do Apps Script para salvar e carregar dados reais do Google Sheets. Enquanto isso, o sistema está exibindo dados de exemplo.");
+  }
+});
+
+function bindEvents() {
   $("btn-view").addEventListener("click", () => setMode("view"));
   $("btn-edit").addEventListener("click", () => setMode("edit"));
   $("btn-config").addEventListener("click", () => $("config-panel").classList.toggle("hidden"));
@@ -93,16 +104,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("search").addEventListener("input", renderAll);
   $("status-filter").addEventListener("change", renderAll);
   $("type-filter").addEventListener("change", renderAll);
-
-  setMode("view");
-
-  if (state.apiUrl) {
-    loadRows();
-  } else {
-    useSampleData(false);
-    showAlert("Configure a URL da API do Apps Script para salvar e carregar dados reais do Google Sheets. Enquanto isso, o sistema está exibindo dados de exemplo.");
-  }
-});
+}
 
 function setMode(mode) {
   state.mode = mode;
@@ -110,11 +112,17 @@ function setMode(mode) {
   $("editor-card").classList.toggle("hidden", mode !== "edit");
   $("btn-view").classList.toggle("active", mode === "view");
   $("btn-edit").classList.toggle("active", mode === "edit");
+
+  if (mode === "edit") {
+    showAlert("Modo edição ativado. Use o formulário para criar nova subtask ou clique em Editar na tabela para alterar um registro existente.", "ok");
+  }
+
   renderAll();
 }
 
 function saveConfig() {
   const url = $("api-url").value.trim();
+
   if (!url || !url.includes("/exec")) {
     showAlert("Informe a URL do Web App do Apps Script terminada em /exec.");
     return;
@@ -131,8 +139,9 @@ function useSampleData(showMessage = true) {
   state.rows = SAMPLE_DATA.map(normalizeRow);
   state.usingSample = true;
   renderAll();
+
   if (showMessage) {
-    showAlert("Dados de exemplo carregados. Para persistir alterações, configure a URL do Apps Script.");
+    showAlert("Dados de exemplo carregados. Para persistir alterações, configure a API do Apps Script.", "ok");
   }
 }
 
@@ -143,12 +152,18 @@ async function loadRows() {
   }
 
   try {
+    showAlert("Atualizando dados da planilha...", "ok");
+
     const response = await fetch(`${state.apiUrl}?action=list&ts=${Date.now()}`, {
-      method: "GET"
+      method: "GET",
+      cache: "no-store"
     });
 
     const result = await response.json();
-    if (!result.ok) throw new Error(result.error || "Erro ao carregar dados.");
+
+    if (!result.ok) {
+      throw new Error(result.error || "Erro ao carregar dados.");
+    }
 
     state.rows = (result.data || []).map(normalizeRow);
     state.usingSample = false;
@@ -173,30 +188,33 @@ async function postAction(payload) {
     body: JSON.stringify(payload)
   });
 
-  const result = await response.json();
-  if (!result.ok) throw new Error(result.error || "Erro ao salvar dados.");
+  const text = await response.text();
+  let result;
+
+  try {
+    result = JSON.parse(text);
+  } catch (error) {
+    throw new Error("A API respondeu em formato inválido. Confira a implantação do Apps Script.");
+  }
+
+  if (!result.ok) {
+    throw new Error(result.error || "Erro ao salvar dados.");
+  }
+
   return result;
 }
 
 async function saveForm(event) {
   event.preventDefault();
 
-  const record = {};
-  FIELDS.forEach((field) => {
-    const element = document.querySelector(`[name="${cssEscape(field)}"]`);
-    if (element) record[field] = element.value.trim();
-  });
-
-  record.id = $("id").value.trim();
-  record["duration (days)"] = calculateDuration(record.start, record.end);
-  record.status = record.status || "Não iniciado";
+  const record = readForm();
 
   if (!record["task name"] || !record["subtask name"] || !record.start || !record.end) {
     showAlert("Preencha task name, subtask name, start e end.");
     return;
   }
 
-  if (new Date(record.end) < new Date(record.start)) {
+  if (new Date(`${record.end}T00:00:00`) < new Date(`${record.start}T00:00:00`)) {
     showAlert("A data final não pode ser anterior à data inicial.");
     return;
   }
@@ -204,19 +222,36 @@ async function saveForm(event) {
   try {
     if (state.usingSample || !state.apiUrl) {
       upsertLocal(record);
-      showAlert("Registro salvo localmente nos dados de exemplo. Configure a API para gravar no Google Sheets.", "ok");
-    } else {
-      const result = await postAction({ action: "upsert", record });
-      await loadRows();
-      showAlert(`Registro salvo com ID ${result.id}.`, "ok");
+      clearForm();
+      renderAll();
+      showAlert("Registro salvo localmente. Configure a API para gravar no Google Sheets.", "ok");
+      return;
     }
 
+    const result = await postAction({ action: "upsert", record });
     clearForm();
-    renderAll();
+    await loadRows();
+    showAlert(`Registro salvo com sucesso. ID ${result.id}.`, "ok");
   } catch (error) {
     console.error(error);
     showAlert(error.message || "Erro ao salvar registro.");
   }
+}
+
+function readForm() {
+  const record = {};
+
+  FIELDS.forEach((field) => {
+    const element = document.querySelector(`[name="${cssEscape(field)}"]`);
+    record[field] = element ? String(element.value || "").trim() : "";
+  });
+
+  record.id = $("id").value.trim();
+  record["duration (days)"] = calculateDuration(record.start, record.end);
+  record.status = record.status || "Não iniciado";
+  record.type = record.type || "Projeto";
+
+  return record;
 }
 
 function upsertLocal(record) {
@@ -240,18 +275,21 @@ function nextLocalId() {
 }
 
 async function deleteRow(id) {
-  if (!confirm(`Excluir o registro ID ${id}?`)) return;
+  if (!confirm(`Excluir o registro ID ${id}?`)) {
+    return;
+  }
 
   try {
     if (state.usingSample || !state.apiUrl) {
       state.rows = state.rows.filter((row) => String(row.id) !== String(id));
       renderAll();
       showAlert("Registro excluído localmente.", "ok");
-    } else {
-      await postAction({ action: "delete", id });
-      await loadRows();
-      showAlert("Registro excluído.", "ok");
+      return;
     }
+
+    await postAction({ action: "delete", id });
+    await loadRows();
+    showAlert("Registro excluído.", "ok");
   } catch (error) {
     console.error(error);
     showAlert(error.message || "Erro ao excluir registro.");
@@ -260,22 +298,28 @@ async function deleteRow(id) {
 
 function editRow(id) {
   const row = state.rows.find((item) => String(item.id) === String(id));
-  if (!row) return;
+
+  if (!row) {
+    showAlert(`Registro ID ${id} não encontrado.`);
+    return;
+  }
 
   setMode("edit");
+
   $("id").value = row.id || "";
   $("task-name").value = row["task name"] || "";
   $("subtask-name").value = row["subtask name"] || "";
   $("start").value = row.start || "";
   $("end").value = row.end || "";
-  $("duration").value = row["duration (days)"] || "";
+  $("duration").value = row["duration (days)"] || calculateDuration(row.start, row.end) || "";
   $("dependency").value = row.dependency || "";
   $("resources").value = row.resources || "";
   $("type").value = row.type || "Projeto";
   $("status").value = row.status || "Não iniciado";
   $("observacoes").value = row["observações"] || "";
 
-  window.scrollTo({ top: $("editor-card").offsetTop - 18, behavior: "smooth" });
+  showAlert(`Editando o registro ID ${row.id}. Altere os campos e clique em Salvar task/subtask.`, "ok");
+  window.scrollTo({ top: Math.max(0, $("editor-card").offsetTop - 110), behavior: "smooth" });
 }
 
 function clearForm() {
@@ -291,34 +335,58 @@ function updateDurationField() {
 }
 
 function calculateDuration(start, end) {
-  if (!start || !end) return "";
+  if (!start || !end) {
+    return "";
+  }
+
   const startDate = new Date(`${start}T00:00:00`);
   const endDate = new Date(`${end}T00:00:00`);
+
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    return "";
+  }
+
   const diff = Math.round((endDate - startDate) / 86400000);
   return diff >= 0 ? diff + 1 : "";
 }
 
 function normalizeRow(row) {
   const normalized = {};
+
   FIELDS.forEach((field) => {
     normalized[field] = row[field] ?? "";
   });
+
   normalized.id = normalized.id || row.ID || row.Id || "";
   normalized.start = toIsoDate(normalized.start);
   normalized.end = toIsoDate(normalized.end);
+  normalized.status = String(normalized.status || "").trim() || "Não iniciado";
+  normalized.type = String(normalized.type || "").trim() || "Projeto";
   normalized["duration (days)"] = normalized["duration (days)"] || calculateDuration(normalized.start, normalized.end);
+
   return normalized;
 }
 
 function toIsoDate(value) {
-  if (!value) return "";
+  if (!value) {
+    return "";
+  }
 
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    return value;
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return value.trim();
+  }
+
+  if (typeof value === "string" && /^\d{2}\/\d{2}\/\d{4}$/.test(value.trim())) {
+    const [day, month, year] = value.trim().split("/");
+    return `${year}-${month}-${day}`;
   }
 
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return String(value);
+  }
+
   return date.toISOString().slice(0, 10);
 }
 
@@ -339,7 +407,7 @@ function filteredRows() {
       ].join(" ").toLowerCase();
 
       if (term && !haystack.includes(term)) return false;
-      if (status && row.status !== status) return false;
+      if (status && normalizeStatus(row.status) !== normalizeStatus(status)) return false;
       if (type && row.type !== type) return false;
 
       return true;
@@ -366,6 +434,7 @@ function updateTypeFilter() {
   const types = [...new Set(state.rows.map((row) => row.type).filter(Boolean))].sort();
 
   select.innerHTML = '<option value="">Todos os tipos</option>';
+
   types.forEach((type) => {
     const option = document.createElement("option");
     option.value = type;
@@ -373,21 +442,17 @@ function updateTypeFilter() {
     select.appendChild(option);
   });
 
-  if (types.includes(current)) select.value = current;
+  if (types.includes(current)) {
+    select.value = current;
+  }
 }
 
 function renderMetrics(rows) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const late = rows.filter((row) => {
-    const endDate = new Date(`${row.end}T00:00:00`);
-    return row.end && endDate < today && !["Concluído", "Cancelado"].includes(row.status);
-  }).length;
+  const late = rows.filter(isRowLate).length;
 
   $("metric-total").textContent = rows.length;
-  $("metric-progress").textContent = rows.filter((row) => row.status === "Em andamento").length;
-  $("metric-done").textContent = rows.filter((row) => row.status === "Concluído").length;
+  $("metric-progress").textContent = rows.filter((row) => normalizeStatus(row.status) === "em-andamento").length;
+  $("metric-done").textContent = rows.filter((row) => normalizeStatus(row.status) === "concluido").length;
   $("metric-late").textContent = late;
 }
 
@@ -437,7 +502,17 @@ function renderGantt(rows) {
     return;
   }
 
-  const dates = rows.flatMap((row) => [row.start, row.end]).filter(Boolean).map((date) => new Date(`${date}T00:00:00`));
+  const dates = rows
+    .flatMap((row) => [row.start, row.end])
+    .filter(Boolean)
+    .map((date) => new Date(`${date}T00:00:00`))
+    .filter((date) => !Number.isNaN(date.getTime()));
+
+  if (!dates.length) {
+    container.innerHTML = '<div class="empty">Nenhum registro com datas válidas.</div>';
+    return;
+  }
+
   const minDate = new Date(Math.min(...dates));
   const maxDate = new Date(Math.max(...dates));
   const days = dateRange(minDate, maxDate);
@@ -453,6 +528,7 @@ function renderGantt(rows) {
   const timeHead = document.createElement("div");
   timeHead.className = "gantt-time-head";
   timeHead.style.gridTemplateColumns = `repeat(${days.length}, ${dayWidth}px)`;
+
   days.forEach((date) => {
     const day = document.createElement("div");
     day.className = "gantt-day";
@@ -464,6 +540,7 @@ function renderGantt(rows) {
   grid.appendChild(timeHead);
 
   let currentTask = null;
+
   rows.forEach((row) => {
     if (row["task name"] !== currentTask) {
       currentTask = row["task name"];
@@ -484,8 +561,10 @@ function renderGantt(rows) {
     time.className = "gantt-time-cell";
     time.style.gridTemplateColumns = `repeat(${days.length}, ${dayWidth}px)`;
 
-    const offset = daysBetween(minDate, new Date(`${row.start}T00:00:00`));
-    const duration = Math.max(1, daysBetween(new Date(`${row.start}T00:00:00`), new Date(`${row.end}T00:00:00`)) + 1);
+    const startDate = new Date(`${row.start}T00:00:00`);
+    const endDate = new Date(`${row.end}T00:00:00`);
+    const offset = Math.max(0, daysBetween(minDate, startDate));
+    const duration = Math.max(1, daysBetween(startDate, endDate) + 1);
     const isLate = isRowLate(row);
 
     const bar = document.createElement("div");
@@ -494,6 +573,11 @@ function renderGantt(rows) {
     bar.style.width = `${duration * dayWidth - 8}px`;
     bar.title = `${row["subtask name"]} | ${row.start} a ${row.end}`;
     bar.textContent = `${row["subtask name"] || ""}`;
+
+    if (state.mode === "edit") {
+      bar.classList.add("clickable");
+      bar.addEventListener("click", () => editRow(row.id));
+    }
 
     time.appendChild(bar);
     grid.appendChild(left);
@@ -535,6 +619,7 @@ function renderTable(rows) {
     `;
 
     const actionsCell = tr.querySelector(".edit-only");
+
     const editButton = document.createElement("button");
     editButton.className = "mini edit-row";
     editButton.type = "button";
@@ -556,10 +641,25 @@ function renderTable(rows) {
 }
 
 function isRowLate(row) {
-  if (!row.end || ["Concluído", "Cancelado"].includes(row.status)) return false;
+  if (!row.end) {
+    return false;
+  }
+
+  const status = normalizeStatus(row.status);
+
+  if (status === "concluido" || status === "cancelado") {
+    return false;
+  }
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
   const end = new Date(`${row.end}T00:00:00`);
+
+  if (Number.isNaN(end.getTime())) {
+    return false;
+  }
+
   return end < today;
 }
 
@@ -578,25 +678,30 @@ function normalizeStatus(status) {
   return String(status || "")
     .trim()
     .normalize("NFD")
-    .replace(/\p{Diacritic}
-
-
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, "-");
+}
 
 function dateRange(start, end) {
   const dates = [];
   const cursor = new Date(start);
+
   while (cursor <= end) {
     dates.push(new Date(cursor));
     cursor.setDate(cursor.getDate() + 1);
   }
+
   return dates;
 }
 
 function daysBetween(start, end) {
   const a = new Date(start);
   const b = new Date(end);
+
   a.setHours(0, 0, 0, 0);
   b.setHours(0, 0, 0, 0);
+
   return Math.round((b - a) / 86400000);
 }
 
@@ -606,6 +711,11 @@ function formatDay(date) {
 
 function showAlert(message, type = "warn") {
   const alert = $("alert");
+
+  if (!alert) {
+    return;
+  }
+
   alert.textContent = message;
   alert.classList.remove("hidden");
   alert.style.background = type === "ok" ? "#ecfdf3" : "#fff7ed";
@@ -623,6 +733,9 @@ function escapeHtml(value) {
 }
 
 function cssEscape(value) {
-  if (window.CSS && CSS.escape) return CSS.escape(value);
+  if (window.CSS && CSS.escape) {
+    return CSS.escape(value);
+  }
+
   return String(value).replace(/"/g, '\\"');
 }
