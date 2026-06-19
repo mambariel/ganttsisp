@@ -615,12 +615,9 @@ body.edit-mode .edit-only {
   background: var(--ok);
 }
 
+
 /* =========================================================
-   CORES DO GANTT POR STATUS — CORREÇÃO ROBUSTA
-   Prioridade:
-   1. Vencida: vermelho
-   2. Não iniciado: amarelo
-   3. Em andamento: azul SISP
+   CORREÇÃO v5 — EDIÇÃO E CORES DO GANTT
    ========================================================= */
 
 .gantt-bar.status-nao-iniciado {
@@ -641,6 +638,16 @@ body.edit-mode .edit-only {
   box-shadow: 0 6px 14px rgba(217, 45, 32, 0.28) !important;
 }
 
+.gantt-bar.clickable {
+  cursor: pointer;
+  outline: 2px solid rgba(255, 255, 255, 0.55);
+}
+
+.gantt-bar.clickable:hover {
+  filter: brightness(0.96);
+  transform: translateY(-1px);
+}
+
 .status-pill.nao-iniciado {
   background: #fef9c3 !important;
   color: #854d0e !important;
@@ -654,4 +661,12 @@ body.edit-mode .edit-only {
 .status-pill.atrasado {
   background: #fee4e2 !important;
   color: #b42318 !important;
+}
+
+body.edit-mode .edit-only {
+  display: table-cell !important;
+}
+
+body.edit-mode #editor-card {
+  display: block !important;
 }
