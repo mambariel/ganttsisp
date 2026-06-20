@@ -71,7 +71,8 @@ const state = {
   rows: [],
   mode: "view",
   apiUrl: localStorage.getItem("ganttApiUrl") || "",
-  usingSample: false
+  usingSample: false,
+  ganttView: localStorage.getItem("ganttView") || "grouped"
 };
 
 const $ = (id) => document.getElementById(id);
@@ -104,6 +105,16 @@ function bindEvents() {
   $("search").addEventListener("input", renderAll);
   $("status-filter").addEventListener("change", renderAll);
   $("type-filter").addEventListener("change", renderAll);
+
+  const ganttViewSelect = $("gantt-view");
+  if (ganttViewSelect) {
+    ganttViewSelect.value = state.ganttView;
+    ganttViewSelect.addEventListener("change", () => {
+      state.ganttView = ganttViewSelect.value;
+      localStorage.setItem("ganttView", state.ganttView);
+      renderAll();
+    });
+  }
 }
 
 function setMode(mode) {
@@ -413,6 +424,16 @@ function filteredRows() {
       return true;
     })
     .sort((a, b) => {
+      if (state.ganttView === "consolidated") {
+        const startCompare = String(a.start).localeCompare(String(b.start));
+        if (startCompare !== 0) return startCompare;
+
+        const endCompare = String(a.end).localeCompare(String(b.end));
+        if (endCompare !== 0) return endCompare;
+
+        return String(a["subtask name"]).localeCompare(String(b["subtask name"]), "pt-BR");
+      }
+
       const taskCompare = String(a["task name"]).localeCompare(String(b["task name"]), "pt-BR");
       if (taskCompare !== 0) return taskCompare;
       return String(a.start).localeCompare(String(b.start));
@@ -523,7 +544,9 @@ function renderGantt(rows) {
 
   const leftHead = document.createElement("div");
   leftHead.className = "gantt-left-head";
-  leftHead.textContent = "Task / Subtask";
+  leftHead.textContent = state.ganttView === "consolidated"
+    ? "Subtask consolidada"
+    : "Task / Subtask";
 
   const timeHead = document.createElement("div");
   timeHead.className = "gantt-time-head";
@@ -539,6 +562,16 @@ function renderGantt(rows) {
   grid.appendChild(leftHead);
   grid.appendChild(timeHead);
 
+  if (state.ganttView === "consolidated") {
+    renderConsolidatedGanttRows(grid, rows, minDate, days, dayWidth);
+  } else {
+    renderGroupedGanttRows(grid, rows, minDate, days, dayWidth);
+  }
+
+  container.appendChild(grid);
+}
+
+function renderGroupedGanttRows(grid, rows, minDate, days, dayWidth) {
   let currentTask = null;
 
   rows.forEach((row) => {
@@ -550,41 +583,94 @@ function renderGantt(rows) {
       grid.appendChild(group);
     }
 
-    const left = document.createElement("div");
-    left.className = "gantt-left-cell";
-    left.innerHTML = `
-      <span class="subtask">${escapeHtml(row["subtask name"] || "Sem subtask")}</span>
-      <span class="meta">ID ${escapeHtml(row.id)} · ${escapeHtml(row.status || "Sem status")} · ${escapeHtml(row.resources || "Sem recurso")}</span>
-    `;
+    appendGanttRow({
+      grid,
+      row,
+      minDate,
+      days,
+      dayWidth,
+      title: row["subtask name"] || "Sem subtask",
+      meta: `ID ${row.id} · ${row.status || "Sem status"} · ${row.resources || "Sem recurso"}`,
+      barLabel: row["subtask name"] || ""
+    });
+  });
+}
 
-    const time = document.createElement("div");
-    time.className = "gantt-time-cell";
-    time.style.gridTemplateColumns = `repeat(${days.length}, ${dayWidth}px)`;
+function renderConsolidatedGanttRows(grid, rows, minDate, days, dayWidth) {
+  const consolidatedRows = [...rows].sort((a, b) => {
+    const lateCompare = Number(isRowLate(b)) - Number(isRowLate(a));
+    if (lateCompare !== 0) return lateCompare;
 
-    const startDate = new Date(`${row.start}T00:00:00`);
-    const endDate = new Date(`${row.end}T00:00:00`);
-    const offset = Math.max(0, daysBetween(minDate, startDate));
-    const duration = Math.max(1, daysBetween(startDate, endDate) + 1);
-    const isLate = isRowLate(row);
+    const statusOrder = getStatusOrder(a.status) - getStatusOrder(b.status);
+    if (statusOrder !== 0) return statusOrder;
 
-    const bar = document.createElement("div");
-    bar.className = `gantt-bar ${statusClass(row.status)} ${isLate ? "status-atrasado" : ""}`;
-    bar.style.left = `${offset * dayWidth + 4}px`;
-    bar.style.width = `${duration * dayWidth - 8}px`;
-    bar.title = `${row["subtask name"]} | ${row.start} a ${row.end}`;
-    bar.textContent = `${row["subtask name"] || ""}`;
+    const startCompare = String(a.start).localeCompare(String(b.start));
+    if (startCompare !== 0) return startCompare;
 
-    if (state.mode === "edit") {
-      bar.classList.add("clickable");
-      bar.addEventListener("click", () => editRow(row.id));
-    }
-
-    time.appendChild(bar);
-    grid.appendChild(left);
-    grid.appendChild(time);
+    return String(a["subtask name"]).localeCompare(String(b["subtask name"]), "pt-BR");
   });
 
-  container.appendChild(grid);
+  consolidatedRows.forEach((row) => {
+    appendGanttRow({
+      grid,
+      row,
+      minDate,
+      days,
+      dayWidth,
+      title: row["subtask name"] || "Sem subtask",
+      meta: `${row["task name"] || "Sem task"} · ID ${row.id} · ${row.status || "Sem status"} · ${row.resources || "Sem recurso"}`,
+      barLabel: row["subtask name"] || ""
+    });
+  });
+}
+
+function appendGanttRow({ grid, row, minDate, days, dayWidth, title, meta, barLabel }) {
+  const left = document.createElement("div");
+  left.className = "gantt-left-cell";
+  left.innerHTML = `
+    <span class="subtask">${escapeHtml(title)}</span>
+    <span class="meta">${escapeHtml(meta)}</span>
+  `;
+
+  const time = document.createElement("div");
+  time.className = "gantt-time-cell";
+  time.style.gridTemplateColumns = `repeat(${days.length}, ${dayWidth}px)`;
+
+  const startDate = new Date(`${row.start}T00:00:00`);
+  const endDate = new Date(`${row.end}T00:00:00`);
+  const offset = Math.max(0, daysBetween(minDate, startDate));
+  const duration = Math.max(1, daysBetween(startDate, endDate) + 1);
+  const isLate = isRowLate(row);
+
+  const bar = document.createElement("div");
+  bar.className = `gantt-bar ${statusClass(row.status)} ${isLate ? "status-atrasado" : ""}`;
+  bar.style.left = `${offset * dayWidth + 4}px`;
+  bar.style.width = `${duration * dayWidth - 8}px`;
+  bar.title = `${row["task name"]} | ${row["subtask name"]} | ${row.start} a ${row.end}`;
+  bar.textContent = barLabel;
+
+  if (state.mode === "edit") {
+    bar.classList.add("clickable");
+    bar.addEventListener("click", () => editRow(row.id));
+    left.classList.add("clickable-row");
+    left.addEventListener("click", () => editRow(row.id));
+  }
+
+  time.appendChild(bar);
+  grid.appendChild(left);
+  grid.appendChild(time);
+}
+
+function getStatusOrder(status) {
+  const value = normalizeStatus(status);
+
+  if (value === "bloqueado") return 1;
+  if (value === "nao-iniciado") return 2;
+  if (value === "em-andamento") return 3;
+  if (value === "concluido") return 4;
+  if (value === "cancelado") return 5;
+
+  return 9;
 }
 
 function renderTable(rows) {
