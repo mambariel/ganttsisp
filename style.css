@@ -670,3 +670,24 @@ body.edit-mode .edit-only {
 body.edit-mode #editor-card {
   display: block !important;
 }
+
+
+/* =========================================================
+   v6 — Gantt consolidado por subtasks
+   ========================================================= */
+
+#gantt-view {
+  min-width: 210px;
+  border-color: #b9cdf6;
+  background: #ffffff;
+  color: var(--sisp-blue);
+  font-weight: 700;
+}
+
+.gantt-left-cell.clickable-row {
+  cursor: pointer;
+}
+
+.gantt-left-cell.clickable-row:hover {
+  background: #f8fbff;
+}
